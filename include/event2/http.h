@@ -66,6 +66,7 @@ struct event_base;
 
 struct evhttp;
 struct evhttp_request;
+struct evhttp_connection;
 struct evkeyvalq;
 struct evhttp_bound_socket;
 struct evconnlistener;
@@ -357,13 +358,31 @@ void evhttp_send_reply_start(struct evhttp_request *req, int code,
    The reply chunk consists of the data in databuf.  After calling
    evhttp_send_reply_chunk() databuf will be empty, but the buffer is
    still owned by the caller and needs to be deallocated by the caller
-   if necessary.
+   if necessary.  evhttp_send_reply_chunk_withcb() can be used if a
+   callback is required once the data has been flushed to the client.
 
    @param req a request object
    @param databuf the data chunk to send as part of the reply.
 */
 void evhttp_send_reply_chunk(struct evhttp_request *req,
     struct evbuffer *databuf);
+
+/**
+   Send another data chunk as part of an ongoing chunked reply.
+
+   Same as evhttp_send_reply_chunk(), except that the given callback is
+   executed once the data has been flushed to the client.  Only the most
+   recent outstanding evhttp_send_reply_chunk_withcb() callback will be
+   remembered.
+
+   @param req a request object
+   @param databuf the data chunk to send as part of the reply.
+   @param cb the callback to executed
+   @param arg argument given to callback
+*/
+void evhttp_send_reply_chunk_withcb(struct evhttp_request *req,
+    struct evbuffer *databuf, void (*cb)(struct evhttp_connection *, void *), void *arg);
+
 /**
    Complete a chunked reply.
 
