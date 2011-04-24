@@ -516,6 +516,9 @@ void evhttp_connection_set_closecb(struct evhttp_connection *evcon,
 void evhttp_connection_get_peer(struct evhttp_connection *evcon,
     char **address, ev_uint16_t *port);
 
+/** Get the length of the buffered output associated with this connection. */
+size_t evhttp_connection_get_buffered_output_len(struct evhttp_connection *evcon);
+
 /**
     Make an HTTP request over the specified connection.
 
