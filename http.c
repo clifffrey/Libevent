@@ -2122,6 +2122,12 @@ evhttp_connection_get_peer(struct evhttp_connection *evcon,
 	*port = evcon->port;
 }
 
+size_t
+evhttp_connection_get_buffered_output_len(struct evhttp_connection *evcon)
+{
+	return evbuffer_get_length(bufferevent_get_output(evcon->bufev));
+}
+
 int
 evhttp_connection_connect(struct evhttp_connection *evcon)
 {
