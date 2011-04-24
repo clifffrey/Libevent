@@ -2310,6 +2310,13 @@ evhttp_send_done(struct evhttp_connection *evcon, void *arg)
 	}
 }
 
+static void
+evhttp_send_reply_chunk_done(struct evhttp_connection *evcon, void *arg)
+{
+	struct evhttp_request *req = TAILQ_FIRST(&evcon->requests);
+	evcon->reply_chunk_done_cb(req, arg);
+}
+
 /*
  * Returns an error page.
  */
@@ -2406,6 +2413,13 @@ evhttp_send_reply_start(struct evhttp_request *req, int code,
 void
 evhttp_send_reply_chunk(struct evhttp_request *req, struct evbuffer *databuf)
 {
+	evhttp_send_reply_chunk_with_cb(req, databuf, (void (*)(struct evhttp_request *, void *))NULL, NULL);
+}
+
+void
+evhttp_send_reply_chunk_with_cb(struct evhttp_request *req, struct evbuffer *databuf,
+    void (*cb)(struct evhttp_request *, void *), void *arg)
+{
 	struct evhttp_connection *evcon = req->evcon;
 	struct evbuffer *output;
 
@@ -2426,7 +2440,12 @@ evhttp_send_reply_chunk(struct evhttp_request *req, struct evbuffer *databuf)
 	if (req->chunked) {
 		evbuffer_add(output, "\r\n", 2);
 	}
-	evhttp_write_buffer(evcon, NULL, NULL);
+	if (cb) {
+		evcon->reply_chunk_done_cb = cb;
+		evhttp_write_buffer(evcon, evhttp_send_reply_chunk_done, arg);
+	} else {
+		evhttp_write_buffer(evcon, NULL, NULL);
+	}
 }
 
 void

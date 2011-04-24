@@ -101,6 +101,7 @@ struct evhttp_connection {
 	void *closecb_arg;
 
 	struct deferred_cb read_more_deferred_cb;
+	void (*reply_chunk_done_cb)(struct evhttp_request *, void *);
 
 	struct event_base *base;
 	struct evdns_base *dns_base;
