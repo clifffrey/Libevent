@@ -72,6 +72,7 @@ static char const BASIC_REQUEST_BODY[] = "This is funny";
 
 static void http_basic_cb(struct evhttp_request *req, void *arg);
 static void http_chunked_cb(struct evhttp_request *req, void *arg);
+static void http_chunked_infinite_cb(struct evhttp_request *req, void *arg);
 static void http_post_cb(struct evhttp_request *req, void *arg);
 static void http_put_cb(struct evhttp_request *req, void *arg);
 static void http_delete_cb(struct evhttp_request *req, void *arg);
@@ -112,6 +113,7 @@ http_setup(ev_uint16_t *pport, struct event_base *base)
 	evhttp_set_cb(myhttp, "/test", http_basic_cb, base);
 	evhttp_set_cb(myhttp, "/chunked", http_chunked_cb, base);
 	evhttp_set_cb(myhttp, "/streamed", http_chunked_cb, base);
+	evhttp_set_cb(myhttp, "/infinite", http_chunked_infinite_cb, 0);
 	evhttp_set_cb(myhttp, "/postit", http_post_cb, base);
 	evhttp_set_cb(myhttp, "/putit", http_put_cb, base);
 	evhttp_set_cb(myhttp, "/deleteit", http_delete_cb, base);
@@ -341,6 +343,30 @@ http_chunked_cb(struct evhttp_request *req, void *arg)
 	/* but trickle it across several iterations to ensure we're not
 	 * assuming it comes all at once */
 	event_base_once(arg, -1, EV_TIMEOUT, http_chunked_trickle_cb, state, &when);
+}
+
+static void
+http_chunked_infinite_cb(struct evhttp_request *req, void *arg)
+{
+	struct evbuffer *evb = evbuffer_new();
+	ev_uintptr_t bytes_sent = (ev_uintptr_t) arg;
+	static char buf[1024] = { 0 };
+	event_debug(("%s: called\n", __func__));
+
+	if (bytes_sent == 0) {
+		/* first iteration */
+		evhttp_send_reply_start(req, HTTP_OK, "Everything is fine");
+	}
+
+	evbuffer_expand(evb, sizeof(buf));
+	evbuffer_add(evb, buf, sizeof(buf));
+	bytes_sent += sizeof(buf);
+	if (bytes_sent > 20*1024*1024) {
+		fprintf(stdout, "FAILED: infinite stream sent too much data");
+		exit(1);
+	}
+	evhttp_send_reply_chunk_with_cb(req, evb, http_chunked_infinite_cb, (void *)bytes_sent);
+	evbuffer_free(evb);
 }
 
 static void
@@ -3154,6 +3180,90 @@ http_connection_retry_test(void *arg)
 }
 
 static void
+http_infinite_done(struct evhttp_request *req, void *arg)
+{
+	tt_fail_msg("request terminated normally?");
+	event_base_loopexit(arg,NULL);
+}
+
+static void
+http_infinite_rx_cb(struct evhttp_request *req, void *arg)
+{
+	struct evbuffer *evb;
+	ev_uint32_t *bytes_rx = (ev_uint32_t *)arg;
+
+	evb = evhttp_request_get_input_buffer(req);
+	*bytes_rx += evbuffer_get_length(evb);
+
+	if (*bytes_rx > 10*1024*1024) {
+		tt_fail_msg("http_infinite_rx: received too much data");
+	} else if (*bytes_rx > 10*1024) {
+		evhttp_request_pause_receive(req);
+	}
+}
+
+static void
+http_infinite_rx_cancel(evutil_socket_t fd, short what, void *arg)
+{
+	struct evhttp_request *req = (struct evhttp_request *)arg;
+	struct event_base *base;
+
+	base = evhttp_connection_get_base(evhttp_request_get_connection(req));
+	evhttp_cancel_request(req);
+	event_base_loopexit(base, NULL);
+}
+
+static void
+http_infinite_test(void *arg)
+{
+	struct basic_test_data *data = arg;
+	ev_uint16_t port = 0;
+	struct evhttp_connection *evcon = NULL;
+	struct evhttp_request *req = NULL;
+	struct timeval tv;
+	ev_uint32_t bytes_rx = 0;
+
+	exit_base = data->base;
+	test_ok = 0;
+
+	/* auto detect a port */
+	http = http_setup(&port, data->base);
+
+	evcon = evhttp_connection_base_new(data->base, NULL, "127.0.0.1", port);
+	tt_assert(evcon);
+
+	evhttp_connection_set_timeout(evcon, 1);
+	/* also bind to local host */
+	evhttp_connection_set_local_address(evcon, "127.0.0.1");
+
+	req = evhttp_request_new(http_infinite_done, &bytes_rx);
+	tt_assert(req);
+
+	/* Add the information that we care about */
+	evhttp_add_header(evhttp_request_get_output_headers(req), "Host", "somehost");
+
+	if (evhttp_make_request(evcon, req, EVHTTP_REQ_GET, "/infinite") == -1) {
+		tt_abort_msg("Couldn't make request");
+	}
+
+	evhttp_request_set_chunked_cb(req, http_infinite_rx_cb);
+
+	evutil_timerclear(&tv);
+	tv.tv_usec = 500000;
+	event_base_once(data->base, -1, EV_TIMEOUT, http_infinite_rx_cancel, req, &tv);
+
+	event_base_dispatch(data->base);
+
+	tt_int_op(bytes_rx, >, 10*1024);
+	tt_int_op(bytes_rx, <, 100*1024);
+
+ end:
+	if (evcon)
+		evhttp_connection_free(evcon);
+	evhttp_free(http);
+}
+
+static void
 http_primitives(void *ptr)
 {
 	char *escaped = NULL;
@@ -3547,6 +3657,7 @@ struct testcase_t http_testcases[] = {
 	HTTP(stream_in_cancel),
 
 	HTTP(connection_retry),
+	HTTP(infinite),
 	HTTP(data_length_constraints),
 
 	END_OF_TESTCASES
