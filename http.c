@@ -981,8 +981,10 @@ evhttp_read_body(struct evhttp_connection *evcon, struct evhttp_request *req)
 		return;
 	}
 
-	/* Read more! */
-	bufferevent_enable(evcon->bufev, EV_READ);
+	if (!req->chunk_cb_paused) {
+		/* Read more! */
+		bufferevent_enable(evcon->bufev, EV_READ);
+	}
 }
 
 #define get_deferred_queue(evcon)		\
@@ -3551,6 +3553,20 @@ evhttp_request_set_chunked_cb(struct evhttp_request *req,
     void (*cb)(struct evhttp_request *, void *))
 {
 	req->chunk_cb = cb;
+}
+
+void
+evhttp_request_pause_receive(struct evhttp_request *req)
+{
+	bufferevent_disable(req->evcon->bufev, EV_READ);
+	req->chunk_cb_paused = 1;
+}
+
+void
+evhttp_request_resume_receive(struct evhttp_request *req)
+{
+	bufferevent_enable(req->evcon->bufev, EV_READ);
+	req->chunk_cb_paused = 0;
 }
 
 /*

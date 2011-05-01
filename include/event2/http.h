@@ -434,6 +434,17 @@ struct evhttp_request *evhttp_request_new(
 void evhttp_request_set_chunked_cb(struct evhttp_request *,
     void (*cb)(struct evhttp_request *, void *));
 
+/**
+ * Pause delivery of chunks to the chunk_cb.  This can be used to throttle
+ * received data.
+ */
+void evhttp_request_pause_receive(struct evhttp_request *req);
+
+/**
+ * Resume delivery of chunks to requestor.
+ */
+void evhttp_request_resume_receive(struct evhttp_request *req);
+
 /** Frees the request object and removes associated events. */
 void evhttp_request_free(struct evhttp_request *req);
 
